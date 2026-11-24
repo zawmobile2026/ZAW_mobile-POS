@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="my">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#1a73e8" />
+  <title>ဇော်_mobile POS</title>
+  <link id="manifest-link" rel="manifest" />
+  <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: sans-serif; margin: 0; padding: 14px; background: #f2f5f9; color: #1f2937; }
+    .header { background: #1a73e8; color: #fff; padding: 14px 16px; border-radius: 12px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .header h1 { margin: 0; font-size: 20px; }
+    .header small { opacity: 0.9; font-size: 12px; }
+    .sync-status { font-size: 12px; background: rgba(255,255,255,0.2); padding: 4px 10px; border-radius: 999px; }
+    .card { background: #fff; padding: 14px; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.06); margin-bottom: 14px; }
+    .card h3 { margin: 0 0 10px 0; font-size: 16px; color: #111827; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+    .imei-group { display: flex; gap: 6px; }
+    .imei-group input { flex: 1; }
+    .scan-btn { width: auto; background: #0f9d58; padding: 10px 12px; white-space: nowrap; }
+    .scan-btn:hover { background: #0b7d45; }
+    input, button { padding: 10px; border-radius: 8px; border: 1px solid #d1d5db; font-size: 14px; width: 100%; }
+    button { background: #1a73e8; color: #fff; border: none; cursor: pointer; font-weight: bold; }
+    button:hover { background: #1558b0; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .sell-btn { background: #0f9d58; padding: 6px 10px; font-size: 12px; width: auto; }
+    .del-btn { background: #d93025; padding: 6px 10px; font-size: 12px; width: auto; }
+    .refresh-btn { background: #374151; padding: 6px 12px; font-size: 12px; width: auto; }
+    .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 12px; }
+    .stat { background: #f8fafc; border: 1px solid #e5e7eb; padding: 10px; border-radius: 8px; font-weight: bold; font-size: 13px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 9px 8px; border-bottom: 1px solid #eee; text-align: left; font-size: 13px; white-space: nowrap; }
+    th { background: #f3f4f6; }
+    .badge-stock { background: #dcfce7; color: #166534; padding: 3px 8px; border-radius: 999px; font-weight: bold; font-size: 12px; }
+    .badge-sold { background: #fee2e2; color: #991b1b; padding: 3px 8px; border-radius: 999px; font-weight: bold; font-size: 12px; }
+    .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.78); z-index: 999; align-items: center; justify-content: center; padding: 14px; }
+    .modal.active { display: flex; }
+    .modal-box { background: #fff; width: 100%; max-width: 440px; border-radius: 14px; padding: 14px; text-align: center; }
+    .modal-box h4 { margin: 0 0 10px 0; font-size: 16px; }
+    #videoPreview { width: 100%; max-height: 280px; border-radius: 10px; background: #000; object-fit: cover; }
+    .scan-hint { font-size: 12px; color: #4b5563; margin: 8px 0 12px; }
+    .close-btn { background: #d93025; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>ဇော်_mobile</h1>
+      <small>Cloud POS + IMEI Scanner</small>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <span id="syncStatus" class="sync-status">အဆင်သင့်</span>
+      <button class="refresh-btn" onclick="loadFromCloud()">ပြန်စစ်မည်</button>
+    </div>
+  </div>
+  <div class="card">
+    <h3>ဖုန်းစာရင်း အသစ်ထည့်ရန်</h3>
+    <div class="grid">
+      <input id="model" placeholder="Model (ဥပမာ - Redmi K90)" />
+      <div class="imei-group">
+        <input id="imei" placeholder="IMEI (15 လုံး)" inputmode="numeric" />
+        <button type="button" class="scan-btn" onclick="openScanner()">📷 စကင်န်</button>
+      </div>
+      <input id="ram" placeholder="RAM (ဥပမာ - 8GB)" />
+      <input id="rom" placeholder="ROM (ဥပမာ - 256GB)" />
+      <input id="buyPrice" type="number" placeholder="ယူဈေး" />
+      <input id="sellPrice" type="number" placeholder="ရောင်းဈေး" />
+      <button id="addBtn" onclick="addPhone()">+ စာရင်းထည့်မည်</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="summary">
+      <div class="stat" id="stockCount">လက်ကျန်: 0 လုံး</div>
+      <div class="stat" id="soldCount">ရောင်းပြီး: 0 လုံး</div>
+      <div class="stat" id="profitSum">အမြတ် (ရောင်းပြီး): 0</div>
+    </div>
+    <input id="search" oninput="render()" placeholder="Model, IMEI, RAM, ROM ဖြင့် ရှာရန်..." style="margin-bottom: 10px;" />
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Model</th>
+            <th>IMEI</th>
+            <th>RAM</th>
+            <th>ROM</th>
+            <th>ယူဈေး</th>
+            <th>ရောင်းဈေး</th>
+            <th>အခြေအနေ</th>
+            <th>လုပ်ဆောင်ချက်</th>
+          </tr>
+        </thead>
+        <tbody id="list"></tbody>
+      </table>
+    </div>
+  </div>
+  <div id="scannerModal" class="modal">
+    <div class="modal-box">
+      <h4>IMEI Barcode စကင်န်ဖတ်ရန်</h4>
+      <video id="videoPreview" playsinline autoplay muted></video>
+      <div class="scan-hint">ဖုန်းဘူး/ဖုန်းပေါ်က IMEI Barcode ကို ကင်မရာရှေ့မှာ ငြိမ်ငြိမ်လေး ထားပေးပါ</div>
+      <button type="button" class="close-btn" onclick="closeScanner()">ပိတ်မည်</button>
+    </div>
+  </div>
+  <script>
+    const SCRIPT_URL = "YOUR_GOOGLE_SCRIPT_WEB_APP_URL";
+    const manifestData = {
+      name: "ဇော်_mobile",
+      short_name: "ဇော်_mobile",
+      start_url: ".",
+      display: "standalone",
+      background_color: "#f2f5f9",
+      theme_color: "#1a73e8",
+      icons: [
+        {
+          src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='36' fill='%231a73e8'/%3E%3Ctext x='96' y='118' font-size='78' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='bold'%3E%E1%80%87%3C/text%3E%3C/svg%3E",
+          sizes: "192x192",
+          type: "image/svg+xml"
+        }
+      ]
+    };
+    const blob = new Blob([JSON.stringify(manifestData)], { type: "application/json" });
+    document.getElementById("manifest-link").href = URL.createObjectURL(blob);
+    let codeReader = null;
+    let isScanning = false;
+    async function openScanner() {
+      if (!window.ZXing) {
+        alert("Barcode Scanner library ခေါ်ယူမရပါ။ အင်တာနက်စစ်ဆေးပါ။");
+        return;
+      }
+      const modal = document.getElementById("scannerModal");
+      modal.classList.add("active");
+      isScanning = true;
+      if (!codeReader) {
+        codeReader = new ZXing.BrowserMultiFormatReader();
+      }
+      try {
+        await codeReader.decodeFromConstraints(
+          { video: { facingMode: { ideal: "environment" } } },
+          "videoPreview",
+          (result, err) => {
+            if (!isScanning) return;
+            if (result) {
+              const rawText = result.getText().trim();
+              const digitsOnly = rawText.replace(/\D/g, "");
+              const finalImei = digitsOnly.length >= 14 ? digitsOnly.slice(0, 15) : rawText;
+              document.getElementById("imei").value = finalImei;
+              closeScanner();
+            }
+          }
+        );
+      } catch (e) {
+        alert("ကင်မရာဖွင့်၍ မရပါ။ Camera Permission ဖွင့်ပေးပါ (HTTPS Link ဖြစ်ရန်လိုအပ်ပါသည်)။");
+        closeScanner();
+      }
+    }
+    function closeScanner() {
+      isScanning = false;
+      if (codeReader) {
+        codeReader.reset();
+      }
+      document.getElementById("scannerModal").classList.remove("active");
+    }
+    let phones = JSON.parse(localStorage.getItem("zaw_mobile_cache") || "[]");
+    function setStatus(text) {
+      document.getElementById("syncStatus").textContent = text;
+    }
+    async function loadFromCloud() {
+      if (!SCRIPT_URL.startsWith("http")) {
+        setStatus("Local Mode");
+        render();
+        return;
+      }
+      setStatus("Cloud မှ ဆွဲယူနေသည်...");
+      try {
+        const res = await fetch(SCRIPT_URL);
+        const data = await res.json();
+        phones = data;
+        localStorage.setItem("zaw_mobile_cache", JSON.stringify(phones));
+        setStatus("Cloud နှင့် ချိတ်ဆက်ပြီး");
+        render();
+      } catch (err) {
+        setStatus("အော့ဖ်လိုင်း (Cache)");
+        render();
+      }
+    }
+    async function sendToCloud(payload) {
+      if (!SCRIPT_URL.startsWith("http")) return true;
+      setStatus("Cloud သို့ ပို့နေသည်...");
+      try {
+        await fetch(SCRIPT_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "text/plain" },
+          body: JSON.stringify(payload)
+        });
+        setStatus("သိမ်းဆည်းပြီး");
+        return true;
+      } catch (err) {
+        setStatus("ပို့ဆောင်မှု မအောင်မြင်ပါ");
+        return false;
+      }
+    }
+    async function addPhone() {
+      const model = document.getElementById("model").value.trim();
+      const imei = document.getElementById("imei").value.trim();
+      const ram = document.getElementById("ram").value.trim();
+      const rom = document.getElementById("rom").value.trim();
+      const buyPrice = Number(document.getElementById("buyPrice").value || 0);
+      const sellPrice = Number(document.getElementById("sellPrice").value || 0);
+      if (!model || !imei) {
+        alert("Model နဲ့ IMEI ထည့်ပေးပါ။");
+        return;
+      }
+      const btn = document.getElementById("addBtn");
+      btn.disabled = true;
+      const newPhone = {
+        id: String(Date.now()),
+        model,
+        imei,
+        ram,
+        rom,
+        buyPrice,
+        sellPrice,
+        status: "In Stock"
+      };
+      phones.unshift(newPhone);
+      localStorage.setItem("zaw_mobile_cache", JSON.stringify(phones));
+      render();
+      ["model", "imei", "ram", "rom", "buyPrice", "sellPrice"].forEach(id => {
+        document.getElementById(id).value = "";
+      });
+      await sendToCloud({ action: "add", phone: newPhone });
+      btn.disabled = false;
+    }
+    async function markSold(id) {
+      phones = phones.map(p => String(p.id) === String(id) ? { ...p, status: "Sold" } : p);
+      localStorage.setItem("zaw_mobile_cache", JSON.stringify(phones));
+      render();
+      await sendToCloud({ action: "sell", id: String(id) });
+    }
+    async function removePhone(id) {
+      if (!confirm("ဒီစာရင်းကို ဖျက်မှာ သေချာပါသလား?")) return;
+      phones = phones.filter(p => String(p.id) !== String(id));
+      localStorage.setItem("zaw_mobile_cache", JSON.stringify(phones));
+      render();
+      await sendToCloud({ action: "delete", id: String(id) });
+    }
+    function render() {
+      const q = document.getElementById("search").value.trim().toLowerCase();
+      const tbody = document.getElementById("list");
+      tbody.innerHTML = "";
+      let inStock = 0, sold = 0, profit = 0;
+      phones.forEach(p => {
+        if (p.status === "In Stock") inStock++;
+        else {
+          sold++;
+          profit += (Number(p.sellPrice) - Number(p.buyPrice));
+        }
+      });
+      document.getElementById("stockCount").textContent = `လက်ကျန်: ${inStock} လုံး`;
+      document.getElementById("soldCount").textContent = `ရောင်းပြီး: ${sold} လုံး`;
+      document.getElementById("profitSum").textContent = `အမြတ် (ရောင်းပြီး): ${profit.toLocaleString()}`;
+      phones
+        .filter(p => !q ||
+          p.model.toLowerCase().includes(q) ||
+          p.imei.toLowerCase().includes(q) ||
+          (p.ram || "").toLowerCase().includes(q) ||
+          (p.rom || "").toLowerCase().includes(q)
+        )
+        .forEach(p => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${p.model}</td>
+            <td>${p.imei}</td>
+            <td>${p.ram || "-"}</td>
+            <td>${p.rom || "-"}</td>
+            <td>${Number(p.buyPrice).toLocaleString()}</td>
+            <td>${Number(p.sellPrice).toLocaleString()}</td>
+            <td><span class="${p.status === "In Stock" ? "badge-stock" : "badge-sold"}">${p.status === "In Stock" ? "လက်ကျန်" : "ရောင်းပြီး"}</span></td>
+            <td>
+              ${p.status === "In Stock" ? `<button class="sell-btn" onclick="markSold('${p.id}')">ရောင်းမည်</button>` : ""}
+              <button class="del-btn" onclick="removePhone('${p.id}')">ဖျက်</button>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+    }
+    loadFromCloud();
+  </script>
+</body>
+</html>
